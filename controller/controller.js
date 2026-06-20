@@ -29,14 +29,14 @@ const server = http.createServer(async(req, res) =>{
         try{
             const body = await parseBody(req);
             const { chunkCount } = body;
-            const allocation = [];
+            const allocations = [];
 
             for(let i=0; i<chunkCount; i++){
-                allocation.push(getNextNode());
+                allocations.push(getNextNode());
             }
         
         res.writeHead(200, {"content-type": "application/json"});
-        res.end(JSON.stringify({allocation}));
+        res.end(JSON.stringify({allocations}));
         }
         catch (err){
             res.writeHead(400, {"content-type": "application/json"});
