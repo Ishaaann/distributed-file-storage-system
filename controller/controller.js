@@ -25,6 +25,71 @@ function parseBody(req){
 
 const server = http.createServer(async(req, res) =>{
     const parts = req.url.split('/');
+    if(req.method === 'POST' && parts[1] === 'allocate'){
+        try{
+            const body = await parseBody(req);
+            const { chunkCount } = body;
+            const allocation = [];
+
+            for(let i=0; i<chunkCount; i++){
+                allocation.push(getNextNode());
+            }
+        
+        res.writeHead(200, {"content-type": "application/json"});
+        res.end(JSON.stringify({allocation}));
+        }
+        catch (err){
+            res.writeHead(400, {"content-type": "application/json"});
+            res.end(JSON.stringify({error: err.message}));
+        }
+        return;
+    }
+
+    if(req.method === 'POST' && parts[1]==='files'){
+        try{
+            const body = await parseBody(req);
+            const { fileName, chunks, fileSize } = body;
+
+            fileRegistry.set(fileName, {fileName, chunks, fileSize, uploadedAt: new Date().toISOString()});
+            res.writeHead(201, {"content-type": "application/json"});
+            res.end(JSON.stringify({status: 'registered', fileName}));
+        }
+        catch (err){
+            res.writeHead(400, {"content-type": "application/json"});
+            res.end(JSON.stringify({error: err.message}));
+        }
+        return;
+    }
+
+    if(req.method === 'GET' && parts[1] === 'files' && !parts[2]){
+        const files = Array.from(fileRegistry.values()).map((f) =>({
+            filename: f.fileName,
+            totalsize: f.fileSize,
+            chunkCount: f.chunks.length,
+            uploadedAt: f.uploadedAt,
+        }));
+    
+
+        res.writeHead(200, {"content-type": "application/json"});
+        res.end(JSON.stringify({files}));
+        return;
+    }
+
+    if(req.method === 'GET' && parts[1] === 'files' && parts[2]){
+        const filename = decodeURIComponent(parts[2]);
+        const file = fileRegistry.get(filename);
+
+        if(!file){
+            res.writeHead(404, {"content-type": "application/json"});
+            res.end(JSON.stringify({error: "File not found"}));
+            return;
+        }
+
+        res.writeHead(201, {"content-type": "application/json"});
+        res.end(JSON.stringify(file));
+        return;
+    }
+
     if(req.method === 'GET' && parts[1] === 'health'){
         res.writeHead(200, {"content-type": "application/json"});
         res.end(JSON.stringify({
