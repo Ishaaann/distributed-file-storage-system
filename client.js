@@ -91,16 +91,20 @@ async function upload(filePath){
         const chunkData = chunkdataList[i];
         const hash = crypto.createHash('sha256').update(chunkData).digest('hex');
         const chunkId = `${fileName}-chunk-${i}-${hash.slice(0,8)}`;
-        const nodeURL = allocations[i];
+        // const nodeURL = allocations[i];
+        const { primary, replica } = allocations[i];
 
-        await sendChunk(nodeURL, chunkId, chunkData);
-        console.log(`Chunk ${i} uploaded to ${nodeURL} with ID: ${chunkId} and length: ${chunkData.length} bytes`);
-        chunks.push({index: i, chunkId, nodeURL, size: chunkData.length, hash});
+        await sendChunk(primary, chunkId, chunkData);
+        console.log(`Chunk ${i} uploaded to ${primary} with ID: ${chunkId} and length: ${chunkData.length} bytes`);
+        await sendChunk(replica, chunkId, chunkData);
+        console.log(`Chunk ${i} replicated to ${replica} with ID: ${chunkId} and length: ${chunkData.length} bytes`);
+        chunks.push({index: i, chunkId, primaryURL: primary, replicaURL: replica, size: chunkData.length, hash});
     }
 
     await httpReq(`${coordinator_url}/files`, {method: 'POST', body: JSON.stringify({fileName, chunks, fileSize}), headers: {'Content-Type': 'application/json'}});
 
     console.log(`File ${fileName} uploaded successfully with ${chunks.length} chunks.`);
+    console.log(`Upload complete: ${fileName} (replicated to 2 nodes)`);
 }
 
 function downloadChunk(nodeUrl, chunkId){
@@ -141,7 +145,17 @@ async function download(filename, outputPath){
 
     const chunkBuffers = [];
     for(const chunk of fileMetadata.chunks){
-        const data = await downloadChunk(chunk.nodeURL, chunk.chunkId);
+        let data;
+        try{
+            data = await downloadChunk(chunk.primaryURL, chunk.chunkId);
+            console.log(`Downloaded chunk ${chunk.chunkId} from primary node ${chunk.primaryURL}`);
+        }
+        catch (err){
+            console.warn(`Failed to download chunk ${chunk.chunkId} from primary node ${chunk.primaryURL}: ${err.message}`);
+            data = await downloadChunk(chunk.replicaURL, chunk.chunkId);
+            console.log(`Downloaded chunk ${chunk.chunkId} from replica node ${chunk.replicaURL}`);
+        }
+        // const data = await downloadChunk(chunk.primaryURL, chunk.chunkId);
         const hash = crypto.createHash('sha256').update(data).digest('hex');
 
         if(hash!==chunk.hash){

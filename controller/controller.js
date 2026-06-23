@@ -32,7 +32,10 @@ const server = http.createServer(async(req, res) =>{
             const allocations = [];
 
             for(let i=0; i<chunkCount; i++){
-                allocations.push(getNextNode());
+                const primary = getNextNode();
+                const replica = getReplicaNode(primary);
+                allocations.push({primary, replica});
+                // allocations.push(getNextNode());
             }
         
         res.writeHead(200, {"content-type": "application/json"});
@@ -115,3 +118,8 @@ function getNextNode(){
     return node;
 }
 
+function getReplicaNode(primaryNode){
+    const primaryInd = storageNodes.indexOf(primaryNode);
+    const replicaInd = (primaryInd+1)%storageNodes.length;
+    return storageNodes[replicaInd];
+}
