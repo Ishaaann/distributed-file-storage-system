@@ -3,6 +3,7 @@ const fs = require('fs')
 const path = require('path')
 const crypto = require('crypto');
 const { hostname } = require('os');
+const { error } = require('console');
 
 const coordinator_url = 'http://localhost:4000';
 const chunk_size = 1024*1024;
@@ -132,6 +133,7 @@ function downloadChunk(nodeUrl, chunkId){
     });
 }
 
+const fsPromises = require('fs').promises;
 async function download(filename, outputPath){
     const metadataRes = await httpReq(`${coordinator_url}/files/${encodeURIComponent(filename)}`); 
 
@@ -141,35 +143,38 @@ async function download(filename, outputPath){
     }
 
     const fileMetadata = JSON.parse(metadataRes.body.toString());
-    console.log(`Downloading file: ${filename} (${fileMetadata.fileSize} bytes) with ${fileMetadata.chunks.length} chunks.`);
+    const outputFile = outputPath || filename;
 
-    const chunkBuffers = [];
-    for(const chunk of fileMetadata.chunks){
-        let data;
-        try{
-            data = await downloadChunk(chunk.primaryURL, chunk.chunkId);
-            console.log(`Downloaded chunk ${chunk.chunkId} from primary node ${chunk.primaryURL}`);
-        }
-        catch (err){
-            console.warn(`Failed to download chunk ${chunk.chunkId} from primary node ${chunk.primaryURL}: ${err.message}`);
-            data = await downloadChunk(chunk.replicaURL, chunk.chunkId);
-            console.log(`Downloaded chunk ${chunk.chunkId} from replica node ${chunk.replicaURL}`);
-        }
-        // const data = await downloadChunk(chunk.primaryURL, chunk.chunkId);
-        const hash = crypto.createHash('sha256').update(data).digest('hex');
+    const fileHandle = await fsPromises.open(outputFile, 'w');
+    console.log(`Downloading file: ${filename} to ${outputFile}`);
+    
+    const limit = 5;
+    const chunks = fileMetadata.chunks;
+    const chunkSize = 1024 * 1024; // 1MB
+    for(let i=0; i<chunks.length; i+=limit){
+        const batch = chunks.slice(i, i+limit);
+        const batchPromises = batch.map(async (chunk) =>{
+            let data;
+            try{
+                data = await downloadChunk(chunk.primaryURL, chunk.chunkId);
+                console.log(`downloading chunk ${chunk.chunkId}`);
+            }
+            catch(err){
+                console.warn("downloading failed from primary url, switching to replica")
+                data = await downloadChunk(chunk.replicaURL, chunk.chunkId);
+            }
 
-        if(hash!==chunk.hash){
-            console.error(`Hash mismatch for chunk ${chunk.chunkId}. Integrity check failed.`);
-            process.exit(1);
-        }
-        console.log(`Verified chunk ${chunk.chunkId} from ${chunk.nodeURL} with size ${data.length} bytes.`);
-        chunkBuffers.push(data);
-
-        const filedata = Buffer.concat(chunkBuffers);
-        const outputfile = outputPath || filename;
-        fs.writeFileSync(outputfile, filedata);
-        console.log(`File ${filename} downloaded successfully to ${outputfile}`);
+            const hash = crypto.createHash('sha256').update(data).digest('hex');
+            if(hash!=chunk.hash){
+                throw new Error(`Hash mismatch for chunk ${chunk.chunkId}. Integrity test failed.`)
+            }
+            const byteOffset = chunk.index*chunkSize;
+            await fileHandle.write(data, 0, data.length, byteOffset);
+        });
+        await Promise.all(batchPromises);
     }
+    await fileHandle.close();
+    console.log(`File ${filename} downloaded successfully.`)
 }
 
 async function list(){
